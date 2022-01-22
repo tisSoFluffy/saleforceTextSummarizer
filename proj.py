@@ -4,11 +4,40 @@ Created on Wed Jan 19 17:33:03 2022
 
 @author: joshu
 """
+import re,string
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.cluster import KMeans
+from sklearn.metrics.pairwise import cosine_similarity
+
+from sklearn.manifold import MDS
+
+
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import roc_auc_score, accuracy_score, confusion_matrix
+from sklearn.model_selection import cross_val_score, StratifiedKFold
+from sklearn.tree import DecisionTreeClassifier
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split, KFold
+
+import pandas as pd
+import os
+
 from gensim.models import Word2Vec,LdaMulticore, TfidfModel
 from gensim import corpora
-from text_processor import *
+
+
+from gensim.models.doc2vec import Doc2Vec, TaggedDocument
+
+
+import numpy as np
+
+from text_processor import clean_doc, One_Hot
+
 import pathlib
-import pandas as pd
 
 files = pathlib.Path('data')
 
@@ -24,6 +53,7 @@ df = pd.DataFrame()
 
 df['titles'] = titles
 df['text'] = text     
+
 
 df.to_csv('corpus.csv')
 
@@ -158,3 +188,224 @@ for i in range(k):
         print(' %s,' % title, end='')
         temp_titles.append(title)
     cluster_title[i]=temp_titles
+
+###############################################################################
+### Plotting
+###############################################################################
+
+# convert two components as we're plotting points in a two-dimensional plane
+# "precomputed" because we provide a distance matrix
+# we will also specify `random_state` so the plot is reproducible.
+
+
+mds = MDS(n_components=2, dissimilarity="precomputed", random_state=1)
+
+dist = 1 - cosine_similarity(TFIDF_matrix)
+
+pos = mds.fit_transform(dist)  # shape (n_components, n_samples)
+
+xs, ys = pos[:, 0], pos[:, 1]
+
+
+#set up colors per clusters using a dict.  number of colors must correspond to K
+cluster_colors = {0: 'black', 1: 'grey', 2: 'blue', 3: 'rosybrown', 4: 'firebrick', 
+                  5:'red', 6:'darksalmon', 7:'sienna'}
+
+
+#set up cluster names using a dict.  
+cluster_dict=cluster_title
+
+#create data frame that has the result of the MDS plus the cluster numbers and titles
+df = pd.DataFrame(dict(x=xs, y=ys, label=clusters, title=range(0,len(clusters)))) 
+
+#group by cluster
+groups = df.groupby('label')
+
+fig, ax = plt.subplots(figsize=(12, 12)) # set size
+ax.margins(0.05) # Optional, just adds 5% padding to the autoscaling
+
+#iterate through groups to layer the plot
+#note that I use the cluster_name and cluster_color dicts with the 'name' lookup to return the appropriate color/label
+for name, group in groups:
+    ax.plot(group.x, group.y, marker='o', linestyle='', ms=12,
+            label=cluster_dict[name], color=cluster_colors[name], 
+            mec='none')
+    ax.set_aspect('auto')
+    ax.tick_params(\
+        axis= 'x',          # changes apply to the x-axis
+        which='both',      # both major and minor ticks are affected
+        bottom='off',      # ticks along the bottom edge are off
+        top='off',         # ticks along the top edge are off
+        labelbottom='on')
+    ax.tick_params(\
+        axis= 'y',         # changes apply to the y-axis
+        which='both',      # both major and minor ticks are affected
+        left='off',      # ticks along the bottom edge are off
+        top='off',         # ticks along the top edge are off
+        labelleft='on')
+
+ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))      #show legend with only 1 point
+
+
+
+#The following section of code is to run the k-means algorithm on the doc2vec outputs.
+#note the differences in document clusters compared to the TFIDF matrix.
+###############################################################################
+### K Means Clustering Doc2Vec
+###############################################################################
+doc2vec_k_means=doc2vec_df.drop('title', axis=1)
+
+k=8
+km = KMeans(n_clusters=k, random_state =89)
+km.fit(doc2vec_k_means)
+clusters_d2v = km.labels_.tolist()
+
+Dictionary={'Doc Name':titles, 'Cluster':clusters_d2v,  'Text': final_processed_text}
+frame=pd.DataFrame(Dictionary, columns=['Cluster', 'Doc Name','Text'])
+
+#dictionary to store clusters and respective titles
+cluster_title={}
+
+#note doc2vec clusters will not have individual words due to the vector representation
+#is based on the entire document not indvidual words. As a result, there won't be individual
+#word outputs from each cluster.   
+for i in range(k):
+    temp=frame[frame['Cluster']==i]
+    temp_title_list=[]
+    for title in temp['Doc Name']:
+        temp_title_list.append(title)
+    cluster_title[i]=temp_title_list
+
+
+###############################################################################
+### Plotting Doc2vec
+###############################################################################
+# convert two components as we're plotting points in a two-dimensional plane
+# "precomputed" because we provide a distance matrix
+# we will also specify `random_state` so the plot is reproducible.
+
+
+mds = MDS(n_components=2, dissimilarity="precomputed", random_state=1)
+
+dist = 1 - cosine_similarity(doc2vec_k_means)
+
+pos = mds.fit_transform(dist)  # shape (n_components, n_samples)
+
+xs, ys = pos[:, 0], pos[:, 1]
+
+
+#set up colors per clusters using a dict.  number of colors must correspond to K
+cluster_colors = {0: 'black', 1: 'grey', 2: 'blue', 3: 'rosybrown', 4: 'firebrick', 
+                  5:'red', 6:'darksalmon', 7:'sienna'}
+
+
+#set up cluster names using a dict.  
+cluster_dict=cluster_title         
+
+#create data frame that has the result of the MDS plus the cluster numbers and titles
+df = pd.DataFrame(dict(x=xs, y=ys, label=clusters, title=range(0,len(clusters)))) 
+
+#group by cluster
+groups = df.groupby('label')
+
+fig, ax = plt.subplots(figsize=(12, 12)) # set size
+ax.margins(0.05) # Optional, just adds 5% padding to the autoscaling
+
+#iterate through groups to layer the plot
+#note that I use the cluster_name and cluster_color dicts with the 'name' lookup to return the appropriate color/label
+for name, group in groups:
+    ax.plot(group.x, group.y, marker='o', linestyle='', ms=12,
+            label=cluster_dict[name], color=cluster_colors[name], 
+            mec='none')
+    ax.set_aspect('auto')
+    ax.tick_params(\
+        axis= 'x',          # changes apply to the x-axis
+        which='both',      # both major and minor ticks are affected
+        bottom='off',      # ticks along the bottom edge are off
+        top='off',         # ticks along the top edge are off
+        labelbottom='on')
+    ax.tick_params(\
+        axis= 'y',         # changes apply to the y-axis
+        which='both',      # both major and minor ticks are affected
+        left='off',      # ticks along the bottom edge are off
+        top='off',         # ticks along the top edge are off
+        labelleft='on')
+
+ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))      #show legend with only 1 point
+
+
+#The following section is used to create a model to predict the clusters labels 
+#based on the the TFIDF matrix and the doc2vec vectors.  Note the model performance 
+#using the two different vectorization methods.
+
+###############################################################################
+### Classification using various RF Model
+###############################################################################
+model_RF=RandomForestClassifier()
+
+
+#TFIDF
+Y=clusters
+X=TFIDF_matrix
+
+#cross validation
+cv_score=cross_val_score(model_RF, X,Y, cv=7)
+
+#mean CV score
+np.mean(cv_score)
+
+
+#Doc2Vec
+Y=clusters_d2v
+X=doc2vec_k_means
+
+#cross validation
+cv_score=cross_val_score(model_RF, X,Y, cv=7)
+
+#mean CV score
+np.mean(cv_score)
+
+
+#the following section is example code to create ECs within the corpus.  A dictionary
+#will need to be created for every EC.  Each EC will need to be applied to the corpus.
+#Below is an example of how the function works.
+###############################################################################
+### EC clean up code 
+###############################################################################
+def create_ec(dictionary, corpus):
+    for key, values in dictionary.items():
+        for value in values:
+            corpus= corpus.replace(value, key)
+    return corpus
+
+
+corpus='i like swiss.  i like cheddar.  i like provolone.'
+cheese_dic={'cheese': ['swiss', 'cheddar', 'provolone']}
+
+corpus_new=create_ec(cheese_dic, corpus)
+
+
+
+###############################################################################
+###  LDA Code
+###############################################################################
+
+#LDA using bag of words
+dictionary = corpora.Dictionary(processed_text)
+corpus = [dictionary.doc2bow(doc) for doc in processed_text]
+
+ldamodel = LdaMulticore(corpus, num_topics=3, id2word=dictionary, passes=2, workers=2)    
+
+for idx, topic in ldamodel.print_topics(-1):
+    print('Topic: {} \nWords: {}'.format(idx, topic))
+
+
+#LDA using TFIDF
+tfidf = TfidfModel(corpus)
+corpus_tfidf = tfidf[corpus]
+ldamodel = LdaMulticore(corpus_tfidf, num_topics=3, id2word=dictionary, passes=2, workers=2)    
+
+for idx, topic in ldamodel.print_topics(-1):
+    print('Topic: {} \nWords: {}'.format(idx, topic))
+
+
